@@ -1,0 +1,6 @@
+# Allow-list: only what the image needs. Keeps .geolocate.json, Terraform state/vars, .env and
+# the venv out of the build context, so credentials can't end up in an image layer.
+*
+!requirements.txt
+!src/
+**/__pycache__
