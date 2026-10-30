@@ -6,7 +6,7 @@ GeoParquet on S3 with DuckDB; no AWS account needed.
 
 ## Prerequisites
 
-- Python ≥ 3.10
+- Python ≥ 3.10, or Docker (see [Docker](#docker))
 - Terraform ≥ 1.3 (or OpenTofu) — only to generate the local config file
 - Network access to S3 (`us-west-2`) and, on the first run, to `extensions.duckdb.org`
 
@@ -68,6 +68,37 @@ One row per input row, same order, written as each point finishes. Columns (a st
 | `geometry_wkt` | Building footprint as WKT |
 
 Building columns are empty for `none` and `invalid`.
+
+## Docker
+
+Run the CLI without a local Python setup. The image contains the code and DuckDB's `spatial` and
+`httpfs` extensions, so at run time it only needs network access to S3.
+
+Build it from the repo root:
+
+```bash
+docker build -f docker/Dockerfile -t geolocate .
+```
+
+The config is **not** in the image (it may contain AWS keys). Generate `.geolocate.json` on the
+host as in [Setup](#setup), or write it by hand with the keys `overture_buildings_path`,
+`s3_region`, `aws_access_key_id`, `aws_secret_access_key`, `aws_session_token` (`null` for
+anonymous access) and `search_radius_m`. Then mount it at `/config/.geolocate.json` and mount
+the folder holding your CSV at `/data`:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/.geolocate.json:/config/.geolocate.json:ro" \
+  -v "$PWD:/data" \
+  geolocate my-points.csv                   # -> ./my-points_geolocated.csv
+```
+
+- Paths are relative to `/data`. For a CSV elsewhere, mount its folder instead:
+  `-v /path/to/folder:/data`.
+- Everything after `geolocate` goes to the CLI, e.g. `--output out.csv` or `--help`.
+- `--user "$(id -u):$(id -g)"` runs as you, so the container can write into your folder and the
+  output CSV is owned by you (without it the container runs as UID 1000).
+- To keep the config somewhere else, mount it anywhere and pass `--config /that/path`.
 
 ## How it works
 
