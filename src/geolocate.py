@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "warning: no file index for this release, so every point scans the whole folder "
             "(slow, and can use several GB of memory). See 'Changing the Overture release' "
-            "in the README.",
+            "in docs/reference.md.",
             file=sys.stderr,
         )
 

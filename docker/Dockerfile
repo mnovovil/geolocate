@@ -1,6 +1,6 @@
 # Run the geolocate CLI in a container. Build from the repo root:
 #   docker build -f docker/Dockerfile -t geolocate .
-# Usage (mounts, config, --user): see the Docker section of README.md.
+# Usage: see Quick start in README.md; mounts, config and --user: see docs/reference.md.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
