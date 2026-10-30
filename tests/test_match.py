@@ -1,7 +1,9 @@
 import math
 import re
 import shutil
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -118,6 +120,23 @@ def test_fallback_reads_only_temp_table(fixture_parquet, tmp_path):
 def test_parquet_read_in_one_query_only():
     source = Path(match.__file__).read_text()
     assert len(re.findall(r"read_parquet\(", source)) == 1
+
+
+def test_concurrent_cursors_keep_their_own_candidates(con, cfg):
+    points = {"house": offset(2, 3), "block": offset(180, 20), "kiosk": offset(200, 0), None: None}
+    points[None] = offset(-160, 0)
+    barrier = threading.Barrier(len(points))
+
+    def worker(expected):
+        with con.cursor() as cur:
+            barrier.wait(10)
+            for _ in range(30):
+                m = match_point(cur, cfg, *points[expected])
+                assert (m and m["building_id"]) == expected
+
+    with ThreadPoolExecutor(len(points)) as pool:
+        for future in [pool.submit(worker, k) for k in points]:
+            future.result()
 
 
 def test_files_for_selects_only_overlapping_files():

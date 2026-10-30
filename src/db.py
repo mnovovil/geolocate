@@ -43,6 +43,7 @@ def connect(cfg: Config) -> duckdb.DuckDBPyConnection:
 
     # Each point re-scans the same parquet files; cache their footers and HTTP metadata.
     # (DuckDB 2.0 renamed enable_object_cache to parquet_metadata_cache; the old name is a no-op.)
-    con.execute("SET parquet_metadata_cache = true")
-    con.execute("SET enable_http_metadata_cache = true")
+    # GLOBAL: a plain SET of parquet_metadata_cache doesn't reach the workers' cursors.
+    con.execute("SET GLOBAL parquet_metadata_cache = true")
+    con.execute("SET GLOBAL enable_http_metadata_cache = true")
     return con

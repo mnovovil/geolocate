@@ -83,3 +83,11 @@ def test_reads_overture_from_s3():
         "SELECT id FROM read_parquet(?) LIMIT 1", [ANON.overture_buildings_path]
     ).fetchone()
     assert row is not None
+
+
+def test_cursors_share_secret_extensions_and_caches():
+    with _connect_or_skip(ANON).cursor() as cur:
+        assert cur.execute("SELECT count(*) FROM duckdb_secrets()").fetchone() == (1,)
+        assert cur.execute("SELECT ST_AsText(ST_Point(1, 2))").fetchone() == ("POINT (1 2)",)
+        for setting in ("parquet_metadata_cache", "enable_http_metadata_cache"):
+            assert cur.execute("SELECT current_setting(?)", [setting]).fetchone() == (True,)

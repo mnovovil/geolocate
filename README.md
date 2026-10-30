@@ -49,7 +49,12 @@ ignored by default).
 ```bash
 .venv/bin/python src/geolocate.py my-points.csv                  # -> my-points_geolocated.csv
 .venv/bin/python src/geolocate.py my-points.csv --output out.csv --config path/to/.geolocate.json
+.venv/bin/python src/geolocate.py my-points.csv --workers 4 --batch-size 1
 ```
+
+Points are matched in parallel batches. `--workers` (default 16) sets the number of threads; lower
+it if you see S3 errors. `--batch-size` (default 20) sets the points per batch. The output is the
+same whatever you choose.
 
 ### Input
 
@@ -67,7 +72,10 @@ file or missing columns. Bad rows don't abort the run; they're written with `mat
 
 ### Output
 
-One row per input row, same order, written as each point finishes. Columns (a stable interface):
+One row per input row, same order, written as each batch finishes. If a run fails, the file holds
+every batch before the failure, complete and in order; finished results from later batches are
+lost (up to 32 batches with the defaults; `--batch-size 1` keeps that small). Columns (a stable
+interface):
 
 | Column | Description |
 |---|---|
@@ -116,7 +124,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
 
 ## How it works
 
-For each point:
+Batches of points run on a thread pool, each with its own DuckDB cursor. For each point:
 
 1. **Candidates** — one query reads the Overture parquet files for buildings whose `bbox` overlaps
    a degree window around the point (the 100 m radius plus a 10 % margin), into a DuckDB temp
@@ -130,9 +138,18 @@ For each point:
 
 ## Known limitations
 
-- **Per-point S3 latency**: points take ~1–2 s each (the first ~3 s), so large inputs take a
-  while — about 30 minutes per 1 500 points. Without a file index the first points take ~15–30 s
-  and later ones ~2–10 s, with a peak of about 3.6 GB of memory.
+- **Throughput**: 500 distinct points around 20 cities, on a 4-core, 4 GB machine (one run each):
+
+  | `--workers` | Time | Points/s | Peak memory |
+  |---|---|---|---|
+  | 1 | 127 s | 3.9 | 0.85 GB |
+  | 4 | 54 s | 9.3 | 0.86 GB |
+  | 8 | 42 s | 11.9 | 0.91 GB |
+  | 16 | 31 s | 16.1 | 1.05 GB |
+
+  Inputs spread over more of the world will be slower, as they share fewer parquet files. Without
+  a file index the first points take ~15–30 s and later ones ~2–10 s each, with a peak of about
+  3.6 GB of memory.
 - **Antimeridian**: points within the search radius of ±180° longitude don't see buildings on the
   other side.
 - **IPv6**: on hosts with broken IPv6, DuckDB's extension download can time out (it doesn't fall

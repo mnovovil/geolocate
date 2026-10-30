@@ -1,7 +1,9 @@
-"""CLI entry point: python src/geolocate.py <coords.csv> [--output out.csv] [--config path].
+"""CLI entry point: python src/geolocate.py <coords.csv> [--output out.csv] [--config path]
+[--workers N] [--batch-size N].
 
-Reads `id, lat, lon` rows, matches each point to an Overture building, and streams one output
-row per input row (same order) so finished rows survive a crash.
+Reads `id, lat, lon` rows and matches each point to an Overture building, in batches on a thread
+pool (the time goes on S3 reads inside DuckDB, which releases the GIL). Writes one output row per
+input row, in input order, a batch at a time, so finished batches survive a crash.
 """
 
 from __future__ import annotations
@@ -11,6 +13,8 @@ import csv
 import math
 import sys
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import duckdb
@@ -21,6 +25,12 @@ from match import FIELDS, match_point, validate_point
 
 INPUT_COLUMNS = ("id", "lat", "lon")
 OUTPUT_COLUMNS = (*INPUT_COLUMNS, *FIELDS)  # public interface — keep stable
+
+DEFAULT_WORKERS = 16
+DEFAULT_BATCH_SIZE = 20
+# Batches queued or finished but not yet written, per worker: enough to keep the workers busy
+# without holding a large input's results in memory behind one slow batch.
+MAX_IN_FLIGHT_PER_WORKER = 2
 
 EXIT_OK = 0
 EXIT_CONFIG = 1
@@ -75,25 +85,56 @@ def _cell(value) -> object:
     return value
 
 
-def run(points, cfg, out_file) -> dict[str, int]:
+def _match_row(con, cfg, raw_id, raw_lat, raw_lon) -> dict:
+    try:
+        lat, lon = parse_point(raw_id, raw_lat, raw_lon)
+    except ValueError:
+        return {"match_type": "invalid"}
+    return match_point(con, cfg, lat, lon) or {"match_type": "none"}
+
+
+def _match_batch(con, cfg, batch) -> list[dict]:
+    # A cursor per batch: it shares the extensions, secret and caches, but has its own temp tables.
+    with con.cursor() as cursor:
+        return [_match_row(cursor, cfg, *row) for row in batch]
+
+
+def run(
+    points, cfg, out_file, workers: int = DEFAULT_WORKERS, batch_size: int = DEFAULT_BATCH_SIZE
+) -> dict[str, int]:
     writer = csv.writer(out_file)
     writer.writerow(OUTPUT_COLUMNS)
     con = connect(cfg)
     counts = dict.fromkeys(("intersects", "nearest", "none", "invalid"), 0)
-    total, start = len(points), time.perf_counter()
+    total, written, start = len(points), 0, time.perf_counter()
     tty = sys.stderr.isatty()
-    for n, (raw_id, raw_lat, raw_lon) in enumerate(points, 1):
-        try:
-            lat, lon = parse_point(raw_id, raw_lat, raw_lon)
-        except ValueError:
-            result = {"match_type": "invalid"}
-        else:
-            result = match_point(con, cfg, lat, lon) or {"match_type": "none"}
-        counts[result["match_type"]] += 1
-        writer.writerow([raw_id, raw_lat, raw_lon, *(_cell(result.get(f)) for f in FIELDS)])
+
+    def write_oldest(in_flight: deque) -> None:
+        nonlocal written
+        batch, future = in_flight.popleft()
+        for (raw_id, raw_lat, raw_lon), result in zip(batch, future.result(), strict=True):
+            counts[result["match_type"]] += 1
+            writer.writerow([raw_id, raw_lat, raw_lon, *(_cell(result.get(f)) for f in FIELDS)])
         out_file.flush()
+        written += len(batch)
         elapsed = time.perf_counter() - start
-        print(f"\r{n}/{total} {elapsed:.1f}s", end="" if tty else "\n", file=sys.stderr)
+        print(f"\r{written}/{total} {elapsed:.1f}s", end="" if tty else "\n", file=sys.stderr)
+
+    in_flight: deque = deque()
+    with ThreadPoolExecutor(workers) as pool:
+        try:
+            for i in range(0, total, batch_size):
+                if len(in_flight) >= workers * MAX_IN_FLIGHT_PER_WORKER:
+                    write_oldest(in_flight)
+                batch = points[i : i + batch_size]
+                in_flight.append((batch, pool.submit(_match_batch, con, cfg, batch)))
+            while in_flight:
+                write_oldest(in_flight)
+        except BaseException:
+            # Everything before the failed batch is written; don't start what's still queued.
+            for _, future in in_flight:
+                future.cancel()
+            raise
     if tty and total:
         print(file=sys.stderr)
     return counts
@@ -109,7 +150,23 @@ def main(argv: list[str] | None = None) -> int:
         "--output", type=Path, help="output CSV (default: <input>_geolocated.csv next to input)"
     )
     parser.add_argument("--config", type=Path, help="config JSON (overrides $GEOLOCATE_CONFIG)")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help="threads matching batches in parallel (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="points per batch; output is written a batch at a time (default: %(default)s)",
+    )
     args = parser.parse_args(argv)
+
+    if args.workers < 1 or args.batch_size < 1:
+        print("error: --workers and --batch-size must be at least 1", file=sys.stderr)
+        return EXIT_INPUT
 
     output = args.output or default_output(args.csv_path)
     if output.resolve() == args.csv_path.resolve():
@@ -135,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     with output.open("w", newline="") as f:
-        counts = run(points, cfg, f)
+        counts = run(points, cfg, f, args.workers, args.batch_size)
     summary = ", ".join(f"{k}={v}" for k, v in counts.items())
     print(f"Wrote {len(points)} rows to {output} ({summary})", file=sys.stderr)
     return EXIT_OK
