@@ -1,0 +1,10 @@
+id,lat,lon,note
+p1,40.4168270,-3.7037764,inside the house
+p2,40.4164398,-3.7038000,30 m south of the house
+p3,40.4168000,-3.7056852,150 m from everything
+p4,40.4168000,-3.7014435,kiosk nested in block
+p5,95,-3.7038,lat out of range
+p6,40.4168,,missing lon
+p7,abc,-3.7038,non-numeric lat
+,40.4168,-3.7038,missing id
+p9,40.4169801,-3.7016792,block outside the kiosk
