@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars (git-ignored) and uncomment what you need.
+
+# Pin a different Overture release:
+# overture_buildings_path = "s3://overturemaps-us-west-2/release/2026-09-24.0/theme=buildings/type=building/"
+
+# Credentials are optional — the Overture bucket is public. Prefer passing them as
+# TF_VAR_aws_access_key_id / TF_VAR_aws_secret_access_key env vars over writing them here.
+# aws_access_key_id     = "AKIA..."
+# aws_secret_access_key = "..."
+# aws_session_token     = ""
+
+# search_radius_m = 100
