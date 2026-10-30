@@ -17,7 +17,8 @@ Run: `python src/geolocate.py <coords.csv> [--output out.csv]`
 
 ## Architecture
 ```
-src/geolocate.py  CLI: argparse, read + validate input CSV, loop points, write output CSV
+src/geolocate.py  CLI: argparse, read + validate input CSV, match batches on a thread pool (one
+                   cursor per batch), write output CSV in input order
   → src/config.py  load .geolocate.json (override path with GEOLOCATE_CONFIG / --config)
   → src/db.py      one DuckDB connection: load extensions, create S3 secret, enable caches
   → src/match.py   per point: pick files from the index → TEMP TABLE of candidates within
@@ -49,6 +50,8 @@ All code lives in `src/`; there is no package install — `src/` is put on the p
   silently loses matches. `parquet_metadata()` stats are VARCHAR, so cast them before `min`/`max`.
 - Unit tests never touch S3: use the local Overture-shaped fixture parquet. Live-S3 tests are
   marked `@pytest.mark.s3` and are excluded by default.
+- Workers use cursors, which share the DuckDB instance but not temp tables or plain `SET` values:
+  use `SET GLOBAL` for settings the workers need. Output order must not depend on thread timing.
 - Pass values into SQL as parameters (`?`), never via string formatting. The only exception is
   the per-point PROJ string for `ST_Transform`, built from validated floats.
 - Always pass `always_xy := true` to `ST_Transform` (EPSG:4326 is lat/lon order in PROJ).
