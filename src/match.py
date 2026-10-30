@@ -1,8 +1,10 @@
 """Per-point building matching against Overture GeoParquet.
 
-For each point the parquet folder is scanned exactly once, into the `candidates` temp table
-(every building whose bbox lies within the search radius). The containing building, or else the
-nearest one within the radius, is then picked from that temp table only.
+For each point the parquet files are read exactly once, into the `candidates` temp table (every
+building whose bbox lies within the search radius). The file index, when configured, limits that
+read to the files that can hold such a building; without it the whole folder is scanned. The
+containing building, or else the nearest one within the radius, is then picked from that temp
+table only.
 
 Known limitation: the bbox window does not wrap the antimeridian, so a point within the radius
 of ±180° longitude misses buildings on the other side.
@@ -14,7 +16,7 @@ import math
 
 import duckdb
 
-from config import Config
+from config import Config, IndexedFile
 
 METRES_PER_DEGREE = 111_320.0
 # Widen the degree window: 111 320 m/° is the equatorial figure, and a meridian degree is only
@@ -83,8 +85,21 @@ def bbox_deltas(lat: float, radius_m: float) -> tuple[float, float]:
     return dlat, dlon
 
 
+def files_for(index: tuple[IndexedFile, ...], lat: float, lon: float, radius_m: float) -> list[str]:
+    """Paths of the indexed files that can hold a building whose bbox is within radius_m."""
+    dlat, dlon = bbox_deltas(lat, radius_m)
+    return [
+        f.path
+        for f in index
+        if f.xmin <= lon + dlon
+        and f.xmax >= lon - dlon
+        and f.ymin <= lat + dlat
+        and f.ymax >= lat - dlat
+    ]
+
+
 def fetch_candidates(
-    con: duckdb.DuckDBPyConnection, path: str, lat: float, lon: float, radius_m: float
+    con: duckdb.DuckDBPyConnection, path: str | list[str], lat: float, lon: float, radius_m: float
 ) -> None:
     """(Re)create the `candidates` temp table: buildings whose bbox is within radius_m."""
     dlat, dlon = bbox_deltas(lat, radius_m)
@@ -104,5 +119,10 @@ def pick_best(
 def match_point(con: duckdb.DuckDBPyConnection, cfg: Config, lat: float, lon: float) -> dict | None:
     """Match one point. Returns a dict keyed by FIELDS, or None when nothing is within range."""
     validate_point(lat, lon)
-    fetch_candidates(con, cfg.overture_buildings_path, lat, lon, cfg.search_radius_m)
+    path = cfg.overture_buildings_path
+    if cfg.overture_file_index is not None:
+        path = files_for(cfg.overture_file_index, lat, lon, cfg.search_radius_m)
+        if not path:  # read_parquet rejects an empty list, and no file means no building
+            return None
+    fetch_candidates(con, path, lat, lon, cfg.search_radius_m)
     return pick_best(con, lat, lon, cfg.search_radius_m)

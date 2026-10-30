@@ -119,3 +119,10 @@ def test_header_only_input_writes_header(config_file, tmp_path):
     out = tmp_path / "out.csv"
     assert main([str(src), "--output", str(out), "--config", str(config_file)]) == EXIT_OK
     assert out.read_text().strip() == ",".join(OUTPUT_COLUMNS)
+
+
+def test_warns_when_config_has_no_file_index(config_file, tmp_path, capsys):
+    assert (
+        main([str(COORDS), "--output", str(tmp_path / "o.csv"), "--config", str(config_file)]) == 0
+    )
+    assert "no file index" in capsys.readouterr().err
