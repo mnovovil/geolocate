@@ -3,3 +3,18 @@ __pycache__/
 *.pyc
 .env
 .venv/
+.pytest_cache/
+
+# Terraform-generated config (may contain credentials)
+.geolocate.json
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl.bak
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Outputs
+*_geolocated.csv
