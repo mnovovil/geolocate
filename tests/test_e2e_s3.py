@@ -1,6 +1,6 @@
 """End-to-end run of the CLI against the live Overture release (opt-in: pytest -m s3 -s).
 
-Uses the real .geolocate.json (or $GEOLOCATE_CONFIG). Prints per-point runtimes as a baseline.
+Uses the real .geolocate.json (or $GEOLOCATE_CONFIG). Prints the total runtime as a baseline.
 """
 
 import csv
@@ -54,14 +54,7 @@ def test_cli_against_live_overture(tmp_path, capsys):
         if name:
             assert name in r["name"], pid
 
-    # Progress lines are "n/total <cumulative>s"; diff them into per-point runtimes.
-    cumulative = [float(s) for s in re.findall(r"\d+/\d+ ([\d.]+)s", capsys.readouterr().err)]
-    per_point = [b - a for a, b in zip([0.0, *cumulative], cumulative, strict=False)]
+    # Progress lines are "n/total <cumulative>s", one per batch; the last has the whole run's time.
+    total = float(re.findall(r"\d+/\d+ ([\d.]+)s", capsys.readouterr().err)[-1])
     with capsys.disabled():
-        print("\nper-point runtime (live S3):")
-        for pid, secs in zip(POINTS, per_point, strict=True):
-            print(f"  {secs:6.1f}s  {pid:22} {rows[pid]['match_type']}")
-        print(
-            f"  total {cumulative[-1]:.1f}s, first point {per_point[0]:.1f}s, "
-            f"rest avg {sum(per_point[1:]) / (len(per_point) - 1):.1f}s"
-        )
+        print(f"\nlive S3: {len(POINTS)} points in {total:.1f}s")

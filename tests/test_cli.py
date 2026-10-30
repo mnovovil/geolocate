@@ -1,9 +1,12 @@
 import csv
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
+import geolocate
 from geolocate import EXIT_CONFIG, EXIT_INPUT, EXIT_OK, OUTPUT_COLUMNS, default_output, main
 
 COORDS = Path(__file__).parent / "fixtures" / "coords.csv"
@@ -126,3 +129,89 @@ def test_warns_when_config_has_no_file_index(config_file, tmp_path, capsys):
         main([str(COORDS), "--output", str(tmp_path / "o.csv"), "--config", str(config_file)]) == 0
     )
     assert "no file index" in capsys.readouterr().err
+
+
+def _run(config_file, src, out, *flags):
+    return main([str(src), "--output", str(out), "--config", str(config_file), *flags])
+
+
+def _points_csv(tmp_path, n):
+    src = tmp_path / "pts.csv"
+    src.write_text("id,lat,lon\n" + "".join(f"p{i},40.0,{i % 180}.5\n" for i in range(n)))
+    return src
+
+
+@pytest.mark.parametrize(
+    ("workers", "batch_size"), [(8, 1), (8, 2), (8, 100), (3, 4), (1, 20), (16, 3)]
+)
+def test_output_is_byte_identical_to_sequential(config_file, tmp_path, workers, batch_size):
+    src = tmp_path / "pts.csv"
+    src.write_text(COORDS.read_text() + "".join(COORDS.read_text().splitlines(True)[1:]) * 3)
+    sequential, parallel = tmp_path / "seq.csv", tmp_path / "par.csv"
+    assert _run(config_file, src, sequential, "--workers", "1", "--batch-size", "1") == EXIT_OK
+    flags = ("--workers", str(workers), "--batch-size", str(batch_size))
+    assert _run(config_file, src, parallel, *flags) == EXIT_OK
+    assert parallel.read_bytes() == sequential.read_bytes()
+
+
+def test_counts_unchanged_with_batches(config_file, tmp_path, capsys):
+    assert _run(config_file, COORDS, tmp_path / "o.csv", "--batch-size", "2") == EXIT_OK
+    err = capsys.readouterr().err
+    assert "9/9" in err
+    assert "intersects=3, nearest=1, none=1, invalid=4" in err
+
+
+def test_order_kept_when_first_batch_finishes_last(config_file, tmp_path, monkeypatch):
+    last_done = threading.Event()
+
+    def fake_match(con, cfg, lat, lon):
+        if lon == 0.5:  # blocks until a later batch has finished, so this needs real parallelism
+            assert last_done.wait(10)
+        elif lon == 3.5:
+            last_done.set()
+        return None
+
+    monkeypatch.setattr(geolocate, "match_point", fake_match)
+    out = tmp_path / "o.csv"
+    src = _points_csv(tmp_path, 4)
+    assert _run(config_file, src, out, "--workers", "2", "--batch-size", "1") == EXIT_OK
+    assert [r["id"] for r in _read(out)] == ["p0", "p1", "p2", "p3"]
+
+
+def test_failed_batch_leaves_complete_prefix_and_propagates(config_file, tmp_path, monkeypatch):
+    def fake_match(con, cfg, lat, lon):
+        if lon == 4.5:  # p4, first point of the third batch
+            raise RuntimeError("S3 went away")
+        return None
+
+    monkeypatch.setattr(geolocate, "match_point", fake_match)
+    out = tmp_path / "o.csv"
+    src = _points_csv(tmp_path, 12)
+    with pytest.raises(RuntimeError, match="S3 went away"):
+        _run(config_file, src, out, "--workers", "4", "--batch-size", "2")
+    assert [r["id"] for r in _read(out)] == ["p0", "p1", "p2", "p3"]
+
+
+def test_in_flight_batches_are_bounded(config_file, tmp_path, monkeypatch):
+    started, peak = [], []
+
+    def fake_match(con, cfg, lat, lon):
+        started.append(lon)
+        if lon == 0.5:
+            time.sleep(0.3)  # everything that can start while the first batch is blocked, has
+            peak.append(len(started))
+        return None
+
+    monkeypatch.setattr(geolocate, "match_point", fake_match)
+    src = _points_csv(tmp_path, 50)
+    assert _run(config_file, src, tmp_path / "o.csv", "--workers", "2", "--batch-size", "1") == 0
+    assert peak == [2 * geolocate.MAX_IN_FLIGHT_PER_WORKER]
+    assert len(started) == 50
+
+
+@pytest.mark.parametrize("flags", [("--workers", "0"), ("--batch-size", "0"), ("--workers", "-1")])
+def test_bad_parallel_flags_fail(config_file, tmp_path, capsys, flags):
+    out = tmp_path / "o.csv"
+    assert _run(config_file, COORDS, out, *flags) == EXIT_INPUT
+    assert "at least 1" in capsys.readouterr().err
+    assert not out.exists()
