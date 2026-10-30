@@ -5,8 +5,8 @@ Fill in the placeholders. Any section left as `TBD` is skipped by the commands.
 
 ## Repository
 
-- **Repo**: `TBD` (e.g. `owner/name` — if TBD, commands use `gh repo view --json nameWithOwner --jq .nameWithOwner`)
-- **Base branch** (PRs target this): `TBD` (if TBD, use the repo's default branch)
+- **Repo**: `mnovovil/geolocate` (e.g. `owner/name` — if TBD, commands use `gh repo view --json nameWithOwner --jq .nameWithOwner`)
+- **Base branch** (PRs target this): `main` (if TBD, use the repo's default branch)
 - **Release branch** (production, if different): `TBD`
 - **Branch naming**: `feat/<issue>-<slug>`, `fix/<issue>-<slug>`, `chore/<issue>-<slug>`
 - **Commit style**: Conventional commits — `feat:`, `fix:`, `ci:`, `chore:`, `docs:`, `test:`, `refactor:`
@@ -16,12 +16,12 @@ Fill in the placeholders. Any section left as `TBD` is skipped by the commands.
 
 | Purpose | Command |
 |---------|---------|
-| Install deps | `TBD` |
-| Lint (+fix) | `TBD` |
-| Format | `TBD` |
+| Install deps | `uv venv .venv && uv pip install -p .venv -r requirements-dev.txt` |
+| Lint (+fix) | `.venv/bin/ruff check --fix .` |
+| Format | `.venv/bin/ruff format .` |
 | Type check | `TBD` |
-| Unit tests | `TBD` |
-| Integration / E2E tests | `TBD` |
+| Unit tests | `.venv/bin/pytest` |
+| Integration / E2E tests | `.venv/bin/pytest -m s3` (live Overture S3, opt-in) |
 | Start local services | `TBD` |
 
 ## Code Areas
