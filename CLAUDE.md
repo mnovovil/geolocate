@@ -27,8 +27,9 @@ src/geolocate.py  CLI: argparse, read + validate input CSV, match batches on a t
 scripts/build_file_index.py → src/file_index.py  once per release: footer scan →
                    infra/overture_file_index.json → (Terraform) → .geolocate.json
 ```
-All code lives in `src/`; there is no package install — `src/` is put on the path by pytest
-(`pythonpath` in `pyproject.toml`) and by running the script directly.
+Keep the README's Mermaid diagram in step when this changes. All code lives in `src/`; there is
+no package install — `src/` is put on the path by pytest (`pythonpath` in `pyproject.toml`) and by
+running the script directly.
 
 ## Contracts
 - **`.geolocate.json`** (written by `infra/`, read by `src/config.py`): keys
@@ -65,4 +66,4 @@ All code lives in `src/`; there is no package install — `src/` is put on the p
 - Lint: `.venv/bin/ruff check --fix .` · Format: `.venv/bin/ruff format .`
 - Tests: `.venv/bin/pytest` (excludes S3) · Live S3: `.venv/bin/pytest -m s3`
 - Infra: `terraform -chdir=infra init && terraform -chdir=infra apply`
-- Docker: `docker build -f docker/Dockerfile -t geolocate .` · run: see README "Docker"
+- Docker: `docker build -f docker/Dockerfile -t geolocate .` · run: see README "Quick start"
