@@ -126,6 +126,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return EXIT_CONFIG
 
+    if cfg.overture_file_index is None:
+        print(
+            "warning: no file index for this release, so every point scans the whole folder "
+            "(slow, and can use several GB of memory). See 'Changing the Overture release' "
+            "in the README.",
+            file=sys.stderr,
+        )
+
     with output.open("w", newline="") as f:
         counts = run(points, cfg, f)
     summary = ", ".join(f"{k}={v}" for k, v in counts.items())

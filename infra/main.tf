@@ -17,6 +17,11 @@ terraform {
 
 locals {
   config_path = abspath("${path.module}/../.geolocate.json")
+
+  # Pre-built footer scan (scripts/build_file_index.py). Only valid for the release it was built
+  # from: for any other path the CLI falls back to scanning the whole folder.
+  file_index        = jsondecode(file("${path.module}/overture_file_index.json"))
+  file_index_active = trimsuffix(local.file_index.source, "/") == trimsuffix(var.overture_buildings_path, "/")
 }
 
 resource "local_sensitive_file" "geolocate_config" {
@@ -30,5 +35,6 @@ resource "local_sensitive_file" "geolocate_config" {
     aws_secret_access_key   = var.aws_secret_access_key
     aws_session_token       = var.aws_session_token
     search_radius_m         = var.search_radius_m
+    overture_file_index     = local.file_index_active ? local.file_index : null
   })
 }

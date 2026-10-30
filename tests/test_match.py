@@ -2,14 +2,16 @@ import math
 import re
 import shutil
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import match
-from config import Config
+from config import Config, IndexedFile
 from db import connect
-from match import FIELDS, bbox_deltas, fetch_candidates, match_point, pick_best
+from file_index import build_index
+from match import FIELDS, bbox_deltas, fetch_candidates, files_for, match_point, pick_best
 from tests.fixtures.make_buildings import offset
 
 
@@ -116,6 +118,91 @@ def test_fallback_reads_only_temp_table(fixture_parquet, tmp_path):
 def test_parquet_read_in_one_query_only():
     source = Path(match.__file__).read_text()
     assert len(re.findall(r"read_parquet\(", source)) == 1
+
+
+def test_files_for_selects_only_overlapping_files():
+    index = (
+        IndexedFile("west", -10.0, -5.0, 0.0, 10.0),
+        IndexedFile("east", 5.0, 10.0, 0.0, 10.0),
+        IndexedFile("wide", -10.0, 10.0, 0.0, 10.0),
+    )
+    assert files_for(index, 5.0, -7.0, 100) == ["west", "wide"]
+    assert files_for(index, 5.0, 0.0, 100) == ["wide"]
+    assert files_for(index, 50.0, 0.0, 100) == []
+
+
+def test_files_for_includes_file_just_within_the_radius():
+    dlat, dlon = bbox_deltas(5.0, 100)
+    index = (IndexedFile("near", -3.0, -1.0, 0.0, 10.0),)
+    assert files_for(index, 5.0, -1.0 + dlon * 0.99, 100) == ["near"]
+    assert files_for(index, 5.0, -1.0 + dlon * 1.01, 100) == []
+    index = (IndexedFile("north", -3.0, -1.0, 6.0, 7.0),)
+    assert files_for(index, 6.0 - dlat * 0.99, -2.0, 100) == ["north"]
+
+
+@pytest.fixture
+def split_parquet(fixture_parquet, tmp_path):
+    """The fixture buildings split in two files, plus an index of them."""
+    c = connect(_config(fixture_parquet))
+    folder = tmp_path / "split"
+    folder.mkdir()
+    for name, cond in (("west", "bbox.xmin < ?"), ("east", "bbox.xmin >= ?")):
+        c.execute(
+            f"COPY (SELECT * FROM read_parquet(?) WHERE {cond}) TO '{folder / name}.parquet' "
+            "(FORMAT parquet)",
+            [str(fixture_parquet), offset(100, 0)[1]],
+        )
+    index = build_index(c, str(folder))
+    assert len(index["files"]) == 2
+    return folder, tuple(
+        IndexedFile(f"{folder}/{f['name']}", f["xmin"], f["xmax"], f["ymin"], f["ymax"])
+        for f in index["files"]
+    )
+
+
+@pytest.mark.parametrize(
+    "dxdy", [(2, 3), (0, -40), (-160, 0), (200, 0), (180, 20), (0, 400), (5000, 5000)]
+)
+def test_index_gives_same_result_as_glob(split_parquet, dxdy):
+    folder, index = split_parquet
+    glob_cfg = _config(f"{folder}/*.parquet")
+    c = connect(glob_cfg)
+    lat, lon = offset(*dxdy)
+    indexed = match_point(c, replace(glob_cfg, overture_file_index=index), lat, lon)
+    assert indexed == match_point(c, glob_cfg, lat, lon)
+
+
+def test_unselected_file_is_never_read(split_parquet):
+    folder, index = split_parquet
+    (folder / "east.parquet").unlink()  # the house is in west; a read of east would now fail
+    cfg = replace(_config(f"{folder}/*.parquet"), overture_file_index=index)
+    assert match_point(connect(cfg), cfg, *offset(2, 3))["building_id"] == "house"
+
+
+def test_no_overlapping_file_runs_no_query():
+    index = (IndexedFile("/does/not/exist.parquet", 100.0, 101.0, 0.0, 1.0),)
+    cfg = replace(_config("unused"), overture_file_index=index)
+
+    class NoQueries:
+        def execute(self, *_):
+            raise AssertionError("no query expected")
+
+    assert match_point(NoQueries(), cfg, 40.0, -3.0) is None
+
+
+@pytest.mark.s3
+def test_index_matches_glob_on_live_overture():
+    from config import load_config
+
+    cfg = load_config()
+    assert cfg.overture_file_index, "run `terraform -chdir=infra apply` to get the file index"
+    points = [(40.4153, -3.6844), (-33.8568, 151.2153), (0.0, -30.0), (40.4169, -3.7035)]
+    indexed = connect(cfg)
+    with_index = [match_point(indexed, cfg, *p) for p in points]
+    indexed.close()
+    glob_cfg = replace(cfg, overture_file_index=None)
+    glob_con = connect(glob_cfg)
+    assert with_index == [match_point(glob_con, glob_cfg, *p) for p in points]
 
 
 @pytest.mark.s3

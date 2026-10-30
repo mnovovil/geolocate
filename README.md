@@ -26,8 +26,21 @@ Overture publishes a new release roughly monthly and removes old ones from S3, s
 eventually stops working (reads fail with `No files found that match the pattern`). To bump it,
 copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` (git-ignored), set
 `overture_buildings_path` to a current release from the
-[Overture release calendar](https://docs.overturemaps.org/release-calendar/), and run
-`terraform -chdir=infra apply` again. The same file sets `search_radius_m` and optional S3
+[Overture release calendar](https://docs.overturemaps.org/release-calendar/), rebuild the file
+index for it, and run `terraform -chdir=infra apply` again:
+
+```bash
+.venv/bin/python scripts/build_file_index.py s3://overturemaps-us-west-2/release/<release>/theme=buildings/type=building/
+terraform -chdir=infra apply
+```
+
+The index (`infra/overture_file_index.json`) records each parquet file's bounding box, so a point
+reads only the files that can hold it. Building it takes about a minute and can use over 4 GB of
+memory, but only needs doing once per release; commit the result. If it doesn't match the
+configured release, `apply` reports `file_index_active = false` and the CLI warns and scans the
+whole folder instead: the results are the same, but much slower and using several GB of memory.
+
+The same file sets `search_radius_m` and optional S3
 credentials; the state file then contains those credentials, so keep it out of git (it is
 ignored by default).
 
@@ -83,7 +96,8 @@ docker build -f docker/Dockerfile -t geolocate .
 The config is **not** in the image (it may contain AWS keys). Generate `.geolocate.json` on the
 host as in [Setup](#setup), or write it by hand with the keys `overture_buildings_path`,
 `s3_region`, `aws_access_key_id`, `aws_secret_access_key`, `aws_session_token` (`null` for
-anonymous access) and `search_radius_m`. Then mount it at `/config/.geolocate.json` and mount
+anonymous access) and `search_radius_m` (a hand-written config has no file index, so it runs the
+slower whole-folder scan). Then mount it at `/config/.geolocate.json` and mount
 the folder holding your CSV at `/data`:
 
 ```bash
@@ -104,10 +118,11 @@ docker run --rm --user "$(id -u):$(id -g)" \
 
 For each point:
 
-1. **Candidates** — one query scans the Overture parquet folder for buildings whose `bbox` overlaps
+1. **Candidates** — one query reads the Overture parquet files for buildings whose `bbox` overlaps
    a degree window around the point (the 100 m radius plus a 10 % margin), into a DuckDB temp
-   table. Filtering on `bbox` lets DuckDB skip most row groups via parquet statistics. This is the
-   only parquet read per point.
+   table. The file index picks which files to read, so there is no S3 listing and no scan of the
+   other files; filtering on `bbox` then lets DuckDB skip most row groups via parquet statistics.
+   This is the only parquet read per point.
 2. **Intersects** — `ST_Intersects` against the temp table finds the building containing the point.
    If several do (e.g. nested building parts), the smallest wins.
 3. **Nearest** — otherwise, the closest building in the temp table within 100 m, measured in metres
@@ -115,9 +130,9 @@ For each point:
 
 ## Known limitations
 
-- **Per-point S3 latency**: the first point takes ~15–30 s (listing the S3 files and reading
-  parquet footers); later points take ~2–3 s each, as DuckDB caches that metadata for the run.
-  Large inputs therefore take a while — about 1 hour per 1 500 points.
+- **Per-point S3 latency**: points take ~1–2 s each (the first ~3 s), so large inputs take a
+  while — about 30 minutes per 1 500 points. Without a file index the first points take ~15–30 s
+  and later ones ~2–10 s, with a peak of about 3.6 GB of memory.
 - **Antimeridian**: points within the search radius of ±180° longitude don't see buildings on the
   other side.
 - **IPv6**: on hosts with broken IPv6, DuckDB's extension download can time out (it doesn't fall

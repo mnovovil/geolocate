@@ -77,7 +77,7 @@ Files derived from another source. Add their outputs to `.claude/protected-paths
 
 | Artifact | Source | Precondition | Fetch | Generate | Outputs | Verify |
 |----------|--------|--------------|-------|----------|---------|--------|
-| `TBD` (e.g. `api-types`) | `TBD` (e.g. `http://localhost:8000/openapi.json`) | `TBD` (e.g. API running) | `TBD` | `TBD` | `TBD` | `TBD` |
+| `file-index` | Overture release parquet footers on S3 (`overture_buildings_path` default in `infra/variables.tf`) | Network access, about 4 GB of free memory | Included in Generate | `.venv/bin/python scripts/build_file_index.py <s3-folder>` | `infra/overture_file_index.json` | `.venv/bin/pytest tests/test_file_index.py` |
 
 ## Flagged Paths (`/ce:update`)
 

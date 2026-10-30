@@ -2,7 +2,17 @@ import json
 
 import pytest
 
-from config import DEFAULT_PATH, ENV_VAR, KEYS, Config, ConfigError, buildings_glob, load_config
+from config import (
+    DEFAULT_PATH,
+    ENV_VAR,
+    FILE_INDEX_KEY,
+    KEYS,
+    Config,
+    ConfigError,
+    IndexedFile,
+    buildings_glob,
+    load_config,
+)
 
 # Mirrors jsonencode({...}) in infra/main.tf with the variable defaults.
 TERRAFORM_OUTPUT = {
@@ -14,7 +24,10 @@ TERRAFORM_OUTPUT = {
     "aws_secret_access_key": "",
     "aws_session_token": "",
     "search_radius_m": 100,
+    "overture_file_index": None,
 }
+FOLDER = TERRAFORM_OUTPUT["overture_buildings_path"]
+ENTRY = {"name": "a.parquet", "xmin": -4.5, "xmax": -3, "ymin": 40, "ymax": 41.5}
 
 
 @pytest.fixture
@@ -28,7 +41,7 @@ def write_config(tmp_path):
 
 
 def test_fixture_matches_contract_keys():
-    assert set(TERRAFORM_OUTPUT) == set(KEYS)
+    assert set(TERRAFORM_OUTPUT) == {*KEYS, FILE_INDEX_KEY}
 
 
 def test_loads_terraform_output(write_config):
@@ -112,3 +125,55 @@ def test_invalid_json(tmp_path):
 def test_invalid_radius(write_config, radius):
     with pytest.raises(ConfigError, match="search_radius_m"):
         load_config(write_config(search_radius_m=radius))
+
+
+def test_file_index_key_is_optional(write_config):
+    p = write_config()
+    raw = json.loads(p.read_text())
+    del raw[FILE_INDEX_KEY]
+    p.write_text(json.dumps(raw))
+    assert load_config(p).overture_file_index is None
+
+
+def test_file_index_loaded_with_full_paths(write_config):
+    cfg = load_config(write_config(overture_file_index={"source": FOLDER, "files": [ENTRY]}))
+    assert cfg.overture_file_index == (
+        IndexedFile(FOLDER.rstrip("/") + "/a.parquet", -4.5, -3.0, 40.0, 41.5),
+    )
+
+
+def test_file_index_stays_out_of_repr(write_config):
+    cfg = load_config(write_config(overture_file_index={"source": FOLDER, "files": [ENTRY]}))
+    assert "a.parquet" not in repr(cfg) and "indexed_files=1" in repr(cfg)
+
+
+def test_file_index_source_ignores_trailing_slash(write_config):
+    index = {"source": FOLDER.rstrip("/"), "files": [ENTRY]}
+    assert load_config(write_config(overture_file_index=index)).overture_file_index
+
+
+def test_file_index_from_another_release_is_rejected(write_config):
+    index = {"source": "s3://b/release/old/", "files": [ENTRY]}
+    with pytest.raises(ConfigError, match="s3://b/release/old"):
+        load_config(write_config(overture_file_index=index))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "nope",
+        {"files": [ENTRY]},
+        {"source": FOLDER},
+        {"source": FOLDER, "files": []},
+        {"source": FOLDER, "files": ["nope"]},
+        {"source": FOLDER, "files": [{**ENTRY, "name": ""}]},
+        {"source": FOLDER, "files": [{k: v for k, v in ENTRY.items() if k != "ymax"}]},
+        {"source": FOLDER, "files": [{**ENTRY, "xmin": "-4.5"}]},
+        {"source": FOLDER, "files": [{**ENTRY, "xmin": True}]},
+        {"source": FOLDER, "files": [{**ENTRY, "xmin": float("nan")}]},
+        {"source": FOLDER, "files": [{**ENTRY, "xmin": 5}]},  # inverted
+    ],
+)
+def test_malformed_file_index_is_rejected(write_config, bad):
+    with pytest.raises(ConfigError, match=FILE_INDEX_KEY):
+        load_config(write_config(overture_file_index=bad))
