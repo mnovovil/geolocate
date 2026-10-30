@@ -33,6 +33,8 @@ Path prefixes used to group changes (`/ce:update`) and tag plan steps (`/ce:plan
 | `[src]` | `src/**` | Application code |
 | `[tests]` | `tests/**` | Test suite |
 | `[scripts]` | `scripts/**` | Tooling / one-off scripts |
+| `[docker]` | `docker/**` | Container image for the CLI |
+| `[docs]` | `README.md` | User-facing docs |
 | `[infra]` | `infra/**` | Infrastructure — may require a manual apply after merge |
 | `[ci]` | `.github/**` | CI/CD |
 | `[claude]` | `.claude/**`, `CLAUDE.md` | Agent config / conventions |

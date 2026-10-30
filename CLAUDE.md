@@ -12,6 +12,8 @@ Run: `python src/geolocate.py <coords.csv> [--output out.csv]`
   (`s3://overturemaps-us-west-2/release/<release>/theme=buildings/type=building/`)
 - Terraform (`infra/`) owns the Overture path and optional S3 credentials and writes them to a
   git-ignored `.geolocate.json` at the repo root.
+- Docker (`docker/`): image with `src/` and pre-installed DuckDB extensions; build context is
+  the repo root, `.geolocate.json` is mounted at runtime (`GEOLOCATE_CONFIG=/config/...`).
 
 ## Architecture
 ```
@@ -42,6 +44,8 @@ All code lives in `src/`; there is no package install — `src/` is put on the p
   the per-point PROJ string for `ST_Transform`, built from validated floats.
 - Always pass `always_xy := true` to `ST_Transform` (EPSG:4326 is lat/lon order in PROJ).
 - Never commit `.geolocate.json`, `*.tfstate*` or `*.tfvars` — they may contain credentials.
+  Never put them in the Docker image either: `docker/Dockerfile.dockerignore` is an allow-list
+  (`tests/test_docker.py` enforces it) — add new paths there only if the image needs them.
 
 ## Commands
 - Install: `uv venv .venv && uv pip install -p .venv -r requirements-dev.txt`
@@ -49,3 +53,4 @@ All code lives in `src/`; there is no package install — `src/` is put on the p
 - Lint: `.venv/bin/ruff check --fix .` · Format: `.venv/bin/ruff format .`
 - Tests: `.venv/bin/pytest` (excludes S3) · Live S3: `.venv/bin/pytest -m s3`
 - Infra: `terraform -chdir=infra init && terraform -chdir=infra apply`
+- Docker: `docker build -f docker/Dockerfile -t geolocate .` · run: see README "Docker"
