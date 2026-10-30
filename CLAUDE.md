@@ -6,7 +6,8 @@ Match `(id, lat, lon)` points from a user-supplied CSV to the Overture Maps buil
 Run: `python src/geolocate.py <coords.csv> [--output out.csv]`
 
 ## Stack
-- Python + DuckDB (`import duckdb`, `spatial` + `httpfs` extensions)
+- Python + DuckDB >= 2.0 (`import duckdb`, `spatial` + `httpfs` extensions — downloaded to
+  `~/.duckdb/extensions` on first run, so the first run needs network)
 - Data: Overture buildings GeoParquet on public S3
   (`s3://overturemaps-us-west-2/release/<release>/theme=buildings/type=building/`)
 - Terraform (`infra/`) owns the Overture path and optional S3 credentials and writes them to a
