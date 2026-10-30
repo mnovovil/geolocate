@@ -4,24 +4,13 @@ import shutil
 import time
 from pathlib import Path
 
-import duckdb
 import pytest
 
 import match
 from config import Config
 from db import connect
 from match import FIELDS, bbox_deltas, fetch_candidates, match_point, pick_best
-from tests.fixtures.make_buildings import offset, write_buildings
-
-
-@pytest.fixture(scope="module")
-def fixture_parquet(tmp_path_factory):
-    path = tmp_path_factory.mktemp("overture") / "buildings.parquet"
-    try:
-        write_buildings(str(path))
-    except duckdb.IOException as e:  # spatial extension not installed and no network
-        pytest.skip(f"DuckDB extensions unavailable: {e}")
-    return path
+from tests.fixtures.make_buildings import offset
 
 
 def _config(path) -> Config:
