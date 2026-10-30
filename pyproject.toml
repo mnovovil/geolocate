@@ -1,0 +1,19 @@
+[project]
+name = "geolocate"
+version = "0.1.0"
+description = "Match lat/lon points to Overture Maps buildings with DuckDB"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-m 'not s3'"
+markers = ["s3: hits the live Overture S3 bucket (opt-in: pytest -m s3)"]
