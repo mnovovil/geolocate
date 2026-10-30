@@ -1,0 +1,5 @@
+# Paths Claude must not edit by hand (one glob per line, relative to repo root).
+# Checked by .claude/hooks/guard-files.sh. Add generated files and vendored code here.
+# Examples:
+# src/generated/*
+# vendor/*
